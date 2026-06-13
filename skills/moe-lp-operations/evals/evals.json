@@ -1,0 +1,26 @@
+{
+  "skill_name": "moe-lp-operations",
+  "evals": [
+    {
+      "id": 0,
+      "name": "create-new-wallet",
+      "prompt": "I'm setting up a second instance of this Mantle Merchant Moe LP bot. Create a separate NEW wallet file for it (do not touch or overwrite the existing wallet.json), and tell me the new wallet's address. Don't run any on-chain transactions.",
+      "expected_output": "Uses `moe wallet create --out <new-path>` (not default wallet.json, no --force on wallet.json), reports the new address from the created file, leaves wallet.json untouched.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "position-health-readonly",
+      "prompt": "Read-only: for the WMNT/USDT pool this bot manages on Mantle, what is the current active bin id and MNT price in USDT, and is there an LP position that is currently in range? Do not send any transactions.",
+      "expected_output": "Runs `moe snapshot --json` (or moe-readonly / LPService.read_only), reports the live active_bin_id, mnt_price_usdt, and in-range status from real RPC data — does NOT invent numbers. No live tx.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "narrow-vs-wide-analysis",
+      "prompt": "Based on current market conditions, would this bot pick a narrow or a wide LP position right now, and why? Analyze the market signals it uses. Don't execute anything.",
+      "expected_output": "Runs `moe-farm --once --json --strategy auto` (dry-run) and/or the quant analyzers; explains the decision via Keltner channel width + ATR + MTF regime; notes graceful degradation if candles unavailable. No live tx.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+.env
+.venv/
+wallet.json
+wallet*.json
+# Skill eval run artifacts (regenerable); evals/evals.json is kept
+skills/*-workspace/
+data/
+__pycache__/
+*.pyc
+wallet.json.bac
+# Runtime logs
+*.log
+# Jupyter checkpoint dirs
+.ipynb_checkpoints/
+# Build artifacts
+*.egg-info/
+src/*.egg-info/
+# IDE
+.idea/

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moe-mantle-farming"
+version = "0.1.0"
+description = "Merchant Moe (Mantle) Liquidity Book LP farming bot."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "python-dotenv>=1.0.1,<2",
+  "requests>=2.32.3,<3",
+  "web3>=7.8.0,<8",
+  # Quantitative enhancements (Keltner/ATR volatility analysis)
+  "pandas>=2.0.0,<3",
+  "numpy>=1.24.0,<2",
+  "pybit>=5.7.0,<6",
+  "scipy>=1.10.0,<2",
+]
+
+[project.scripts]
+moe = "moe_mantle_bot.command_cli:main"
+moe-readonly = "moe_mantle_bot.cli:main"
+moe-portfolio = "moe_mantle_bot.portfolio_review_cli:cli_main"
+moe-farm = "moe_mantle_bot.farm_bot:cli_main"
+moe-backtest = "moe_mantle_bot.backtest.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0.0,<8",
+  "black>=23.0.0,<24", 
+  "isort>=5.12.0,<6",
+  "mypy>=1.5.0,<2",
+]

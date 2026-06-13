@@ -1,0 +1,16 @@
+# Core dependencies
+python-dotenv>=1.0.1,<2
+requests>=2.32.3,<3
+web3>=7.8.0,<8
+
+# Quantitative enhancements for MON reward sniping
+numpy>=1.24.0,<2
+pandas>=2.0.0,<3
+scipy>=1.10.0,<2
+pybit>=5.7.0,<6
+
+# Development dependencies (optional)
+pytest>=7.0.0,<8
+black>=23.0.0,<24
+isort>=5.12.0,<6
+mypy>=1.5.0,<2
