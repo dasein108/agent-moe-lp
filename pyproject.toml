@@ -17,6 +17,8 @@ dependencies = [
   "numpy>=1.24.0,<2",
   "pybit>=5.7.0,<6",
   "scipy>=1.10.0,<2",
+  # Backtest charting (price + LP range / equity PNGs)
+  "matplotlib>=3.7.0,<4",
 ]
 
 [project.scripts]

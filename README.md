@@ -16,7 +16,7 @@ Fee-farming only: the bot collects LB swap fees. There is no MOE-emission / Mast
 
 > **No LLM at runtime.** The bot's decisions are fully deterministic — Keltner channel width, ATR, multi-timeframe RSI/EMA regime — not model inference. The "AI" layer is the **agent-operability** surface in `skills/`: it lets an LLM coding agent operate and analyze the bot. The trading engine never calls an LLM.
 
-> **No backtesting harness.** There is no reproducible backtest / historical-replay engine in this repo. A few strategy thresholds carry comments citing offline backtest results (e.g. `engine.py`), but the tooling that produced them is not included. Strategy is exercised via dry-run previews and live runs.
+> **Backtesting.** A historical-replay harness (`moe-backtest`) emulates an LB position over Bybit MNTUSDT candles to estimate fee yield, impermanent loss, in-range time, and net PnL — replaying the **live `StrategyEngine`** against a static baseline. Fee magnitude is an explicit, calibratable assumption (on-chain historical volume isn't available); IL and in-range % are exact. See [Backtesting](#backtesting).
 
 ## Architecture
 
@@ -196,12 +196,13 @@ Set `TELEGRAM_NOTIFICATIONS_ENABLED=true` and provide `TELEGRAM_BOT_TOKEN` / `TE
 
 ## CLI Tools
 
-The bot ships four console scripts:
+The bot ships five console scripts:
 
 - `moe` — main execution CLI (wallet, wrap/unwrap, swap, `lp add`/`lp remove`, snapshot, balance)
 - `moe-readonly` — read-only snapshot tool
 - `moe-portfolio` — portfolio review tool
 - `moe-farm` — automated farming loop
+- `moe-backtest` — historical LP backtester (see [Backtesting](#backtesting))
 
 General flags for `moe`:
 
@@ -326,6 +327,25 @@ Farm bot parameters:
 - `--live`: enable live trading (overrides dry-run)
 - `--poll-interval-seconds <seconds>`: sleep interval for continuous mode
 - `--json`: output detailed JSON results
+
+## Backtesting
+
+`moe-backtest` emulates a Liquidity Book position over historical **Bybit MNTUSDT** candles to estimate fee yield, impermanent loss, in-range time, rebalances, and net PnL. It runs two positions side by side: a **static** buy-and-hold-LP baseline and a **strategy** position that replays the live `StrategyEngine` (Keltner + ATR + MTF) — exiting, re-entering, and resizing exactly as the bot would. USD stablecoins (USDT, USDT0, USD0, USDC) are mapped 1:1 to the MNTUSDT feed.
+
+```bash
+# Backtest the current live position (seeds geometry/fees/size/depth from chain)
+moe-backtest --seed-from-pool 0x<LBpair> --days 90
+
+# Calibrate fee magnitude to the pool's real daily volume
+moe-backtest --seed-from-pool 0x<LBpair> --days 90 --pool-daily-volume-usd 500
+
+# A hypothetical position, JSON + save
+moe-backtest --capital 200 --quote-usd 100 --bin-count 20 --bin-step 100 --days 60 --json --save data/backtests/test.json
+```
+
+The text report ends with the **initial vs final budget** for both static and strategy, and `--chart PATH` (auto-written next to `--save` unless `--no-chart`) renders a PNG: price with the static/strategy LP-range bands and re-center markers, plus the equity curves vs initial budget.
+
+**Inventory and IL are exact** (LB conversion is deterministic from the price path). **Fees are an explicit assumption**: on-chain historical pool volume isn't available, so pool swap volume is approximated from an assumed daily volume (`--pool-daily-volume-usd`, default `1× pool TVL/day`) distributed across candles by Bybit turnover shape, then split by your share of active-bin liquidity. Always calibrate `--pool-daily-volume-usd` to the pool's observed volume before trusting the APR — IL and in-range % don't depend on it, but fee/APR figures do. Candle history is cached to `data/candles/`; results optionally to `data/backtests/`. Full reference: [`skills/moe-lp-operations/references/backtesting.md`](skills/moe-lp-operations/references/backtesting.md).
 
 ## Notes
 

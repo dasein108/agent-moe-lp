@@ -113,6 +113,11 @@ flags, output fields, and worked examples, open the reference for your task:
   bin sizing and entry gates:
   → `references/market-analysis.md`
 
+- **Backtesting** — estimate fee yield, impermanent loss, in-range time, and net
+  PnL of a position over historical Bybit candles; replays the live
+  `StrategyEngine` vs a static baseline; `moe-backtest --seed-from-pool`:
+  → `references/backtesting.md`
+
 - **Programmatic access** — when a CLI flag doesn't expose what you need, drive
   `LPService`, `BalanceManager`, and the `quant/` analyzers directly in Python:
   → `references/python-api.md`

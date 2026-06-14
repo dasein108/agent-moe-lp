@@ -31,7 +31,8 @@ class BacktestConfig:
     protocol_share_bps: int = 2500     # protocol cut of swap fee (bps of fee)
 
     # ── Position shape ──
-    bin_count: int = 10
+    bin_count: int = 10                # static baseline + default initial width
+    strat_initial_bin_count: int | None = None  # strategy's own initial width (else bin_count)
     capital_usd: float = 185.0
     quote_usd_target: float = 50.0     # USD on the quote(USDT) side; rest is MNT
     distribution: str = "uniform"      # uniform | slope | curve
@@ -58,6 +59,20 @@ class BacktestConfig:
     narrow_bin_count: int = 10
     wide_bin_count: int = 80
     wide_confidence_threshold: float = 0.5
+    # Re-entry RSI/regime gate (mirrors the live reentry_policy): when exiting
+    # DOWN while oversold (or in a bear/ranging regime), keep MNT instead of
+    # rebalancing to 50/50 — avoids selling the local low. Off = always 50/50.
+    reentry_rsi_gate: bool = True
+
+    # ── Experimental anti-chase levers (backtest only, for now) ──
+    # Mean-centered re-entry: center the new position on an EMA instead of spot,
+    # so we redeploy near where price reverts to rather than chasing the extreme.
+    reenter_center: str = "spot"       # spot | ema
+    reenter_ema_interval: str = "4h"
+    reenter_ema_period: int = 50
+    # Ranging-regime hold: in a RANGING regime, do NOT re-center — hold the
+    # position and earn fees on the oscillation like a static position would.
+    ranging_hold: bool = False
 
     def derived_lp_fee_rate(self) -> float:
         """LP-net fractional fee per swap (after protocol share)."""
