@@ -14,9 +14,11 @@ Automated liquidity farming bot for the Merchant Moe `WMNT/USDT` Liquidity Book 
 
 Fee-farming only: the bot collects LB swap fees. There is no MOE-emission / MasterChef staking.
 
+> **Yield note.** All backtested figures are **swap fees only**. On pools with active **MOE-emission / MasterChef reward incentives**, total yield (swap fees **+ farm rewards**) can be roughly **3–5× the fee-only numbers** shown here. Reward capture is future work. See [`BACKTESTING_RESULTS.md`](BACKTESTING_RESULTS.md).
+
 > **No LLM at runtime.** The bot's decisions are fully deterministic — Keltner channel width, ATR, multi-timeframe RSI/EMA regime — not model inference. The "AI" layer is the **agent-operability** surface in `skills/`: it lets an LLM coding agent operate and analyze the bot. The trading engine never calls an LLM.
 
-> **Backtesting.** A historical-replay harness (`moe-backtest`) emulates an LB position over Bybit MNTUSDT candles to estimate fee yield, impermanent loss, in-range time, and net PnL — replaying the **live `StrategyEngine`** against a static baseline. Fee magnitude is an explicit, calibratable assumption (on-chain historical volume isn't available); IL and in-range % are exact. See [Backtesting](#backtesting).
+> **Backtesting.** A historical-replay harness (`moe-backtest`) emulates an LB position over Bybit MNTUSDT candles to estimate fee yield, impermanent loss, in-range time, and net PnL — replaying the **live `StrategyEngine`** against static and hold baselines. Fee magnitude is an explicit, calibratable assumption (on-chain historical volume isn't available); IL and in-range % are exact. Full results and findings: **[`BACKTESTING_RESULTS.md`](BACKTESTING_RESULTS.md)**. See also [Backtesting](#backtesting).
 
 ## Architecture
 
@@ -57,6 +59,7 @@ See [`AGENTS.md`](AGENTS.md) for repository contribution guidelines that every a
 
 ## Documentation
 
+- [`BACKTESTING_RESULTS.md`](BACKTESTING_RESULTS.md) - Backtest results: hold vs static vs strategy, width optimization, hyperopt
 - [`docs/README.md`](docs/README.md) - Architecture overview and quick start
 - [`docs/strategy-guide.md`](docs/strategy-guide.md) - Strategy selection, re-entry policy, Keltner analysis
 - [`docs/configuration.md`](docs/configuration.md) - All environment variables and settings
@@ -345,7 +348,16 @@ moe-backtest --capital 200 --quote-usd 100 --bin-count 20 --bin-step 100 --days 
 
 The text report ends with the **initial vs final budget** for both static and strategy, and `--chart PATH` (auto-written next to `--save` unless `--no-chart`) renders a PNG: price with the static/strategy LP-range bands and re-center markers, plus the equity curves vs initial budget.
 
-**Inventory and IL are exact** (LB conversion is deterministic from the price path). **Fees are an explicit assumption**: on-chain historical pool volume isn't available, so pool swap volume is approximated from an assumed daily volume (`--pool-daily-volume-usd`, default `1× pool TVL/day`) distributed across candles by Bybit turnover shape, then split by your share of active-bin liquidity. Always calibrate `--pool-daily-volume-usd` to the pool's observed volume before trusting the APR — IL and in-range % don't depend on it, but fee/APR figures do. Candle history is cached to `data/candles/`; results optionally to `data/backtests/`. Full reference: [`skills/moe-lp-operations/references/backtesting.md`](skills/moe-lp-operations/references/backtesting.md).
+**Inventory and IL are exact** (LB conversion is deterministic from the price path). **Fees are an explicit assumption**: on-chain historical pool volume isn't available, so pool swap volume is approximated from an assumed daily volume (`--pool-daily-volume-usd`, default `1× pool TVL/day`) distributed across candles by Bybit turnover shape, then split by your share of active-bin liquidity. Always calibrate `--pool-daily-volume-usd` to the pool's observed volume before trusting the APR — IL and in-range % don't depend on it, but fee/APR figures do. Candle history is cached to `data/candles/`; results optionally to `data/backtests/`.
+
+**Headline findings** (full detail + tables in **[`BACKTESTING_RESULTS.md`](BACKTESTING_RESULTS.md)**):
+
+- **Position width is the dominant profit lever** — an inverted-U peaking at **~20 bins (±10% price)**, beating the current 10-bin by ~+1 pt mean net across a walk-forward. Width-in-bins is pool-specific (±10% ≈ 20 bins on binStep-100, ~133 on binStep-15).
+- **Auto re-centering is ~net-neutral-to-negative** for MNT/USDT this period; a passive tolerance matches static and removes tail risk. Re-centering earns its keep mainly in sustained trends.
+- Both LP baselines beat **HOLD** comfortably — fee income dominates.
+- **Swap fees only**: pools with reward incentives can yield **~3–5× more** (fees + farm rewards).
+
+Harness reference: [`skills/moe-lp-operations/references/backtesting.md`](skills/moe-lp-operations/references/backtesting.md).
 
 ## Notes
 
