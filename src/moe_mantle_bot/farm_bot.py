@@ -133,6 +133,8 @@ class FarmBot:
         self.strategy_engine = StrategyEngine(
             wide_confidence_threshold=getattr(settings, "wide_confidence_threshold", 0.5),
             min_top_up_free_value_usdt=getattr(settings, "min_top_up_free_value_usdt", 20.0),
+            oor_tolerance_bins=getattr(settings, "oor_tolerance_bins", 15),
+            oor_tolerance_cap_bins=getattr(settings, "oor_tolerance_cap_bins", 40),
         )
         self.notifications = NotificationService(settings)
         self.analytics = Analytics(settings.data_dir / "analytics.db")

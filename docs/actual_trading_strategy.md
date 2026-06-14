@@ -129,6 +129,12 @@ After exit UP, bot buys MNT (mean reversion). After exit DOWN, bot sells MNT for
 All strategy-related changes are tracked here. When modifying any code that affects
 trading decisions, append a dated entry below.
 
+### 2026-06-14: Configurable OOR tolerance (passive mode) — opt-in, default unchanged
+- **Changed**: `StrategyEngine` adaptive out-of-range tolerance floor/cap are now configurable (`engine.py` `__init__` `oor_tolerance_bins`/`oor_tolerance_cap_bins`; `config.py` `OOR_TOLERANCE_BINS`/`OOR_TOLERANCE_CAP_BINS` env; wired in `farm_bot.py`). Defaults remain **15/40** — no behavior change unless set.
+- **Why**: Backtest walk-forward (6 rolling 30-day windows, WMNT/USDT0 binStep-100, ~4 months) showed the bot's re-centering is **net-negative vs a static position** (mean +0.3% vs +3.0%), driven by value-destroying re-centers at price extremes (buy-the-high / sell-the-low). Raising the tolerance to ~30 bins made the strategy **match static (6/6, mean +3.0%)** by holding through ordinary drift and only re-centering on extreme sustained moves. Trend-confirmation and stabilization-hold gates were tested and did **not** help (documented dead-ends).
+- **Effect**: With defaults, none. Setting e.g. `OOR_TOLERANCE_BINS=30` makes the bot far more passive (fewer re-centers, lower tail risk). **Caveat**: tolerance is in BINS; price-% ≈ bins × bin_step/100, so the right value differs per pool (30 bins ≈ 4.5% on binStep-15, ≈ 30% on binStep-100). Validated only on one pool / 4-month window — tune per pool before relying on it.
+- **Tooling**: New `moe-backtest` harness (`src/moe_mantle_bot/backtest/`) with the walk-forward / sweep scripts produced these findings.
+
 ### 2026-06-13: Initial strategy
 - **Strategy**: Single-position WMNT/USDT fee farming on the Merchant Moe Liquidity Book V2.2 pool (Mantle mainnet). One live LP intent at a time, auto-selected narrow vs. wide via Keltner channel width plus an ATR floor (`--strategy auto`), or forced with `--strategy narrow|wide`.
 - **Lifecycle**: Monitor active bin vs. position range; hold while in range; top-up when free wallet value is sufficient; exit-and-reenter when out of range (subject to OOR tolerance / dormant-hold logic); rebalance inventory per the re-entry policy stack before re-entry.
