@@ -162,6 +162,13 @@ class Settings:
     min_top_up_fill_usdt: float = 5.0     # $5 minimum for top-up fill (lower bar since position already exists)
     min_top_up_free_value_usdt: float = 20.0  # Skip top-up planning if free value below this
     wide_confidence_threshold: float = 0.5  # Keltner confidence needed for auto-wide (was 0.8, lowered for MNT/USDT)
+    # Out-of-range tolerance floor/cap (bins) for the adaptive OOR hold. Higher =
+    # more passive: the bot holds through ordinary drift and only re-centers on
+    # extreme sustained moves. Backtest (binStep-100 USDT0, 4mo) showed raising
+    # these to ~30/60 eliminates value-destroying re-centers at price extremes.
+    # Tolerance is in BINS; price-% ≈ bins × bin_step/100 — tune per pool.
+    oor_tolerance_bins: int = 15
+    oor_tolerance_cap_bins: int = 40
     gas_reserve_mnt: float = 2.0  # Mantle L2 gas is cheap; small native reserve suffices
     native_estimate_headroom_mnt: float = 5.0  # Extra native MNT buffer for estimateGas simulation
     max_budget_pct: float = 0.80     # Max fraction of wallet balance usable for LP
@@ -366,6 +373,11 @@ class Settings:
 
         min_top_up_free_env = os.getenv("MIN_TOP_UP_FREE_VALUE_USDT")
         min_top_up_free_value_usdt = float(min_top_up_free_env) if min_top_up_free_env else 20.0
+
+        oor_tolerance_bins = _env_int("OOR_TOLERANCE_BINS", 15)
+        oor_tolerance_cap_bins = _env_int("OOR_TOLERANCE_CAP_BINS", 40)
+        if oor_tolerance_cap_bins < oor_tolerance_bins:
+            raise ValueError("OOR_TOLERANCE_CAP_BINS must be >= OOR_TOLERANCE_BINS")
 
         wide_conf_env = os.getenv("WIDE_CONFIDENCE_THRESHOLD")
         wide_confidence_threshold = float(wide_conf_env) if wide_conf_env else 0.5
@@ -589,6 +601,8 @@ class Settings:
             min_top_up_fill_usdt=min_top_up_fill_usdt,
             min_top_up_free_value_usdt=min_top_up_free_value_usdt,
             wide_confidence_threshold=wide_confidence_threshold,
+            oor_tolerance_bins=oor_tolerance_bins,
+            oor_tolerance_cap_bins=oor_tolerance_cap_bins,
             gas_reserve_mnt=gas_reserve_mnt,
             max_budget_pct=max_budget_pct,
             mnt_min_balance=mnt_min_balance,

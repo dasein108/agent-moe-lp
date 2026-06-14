@@ -14,7 +14,7 @@ from .candle_history import ReplayCandleFetcher, fetch_history, interval_minutes
 from .config import BacktestConfig
 from .engine_adapter import HistoricalMarket
 from .fee_model import step_fee_usd
-from .lb_position import LBPosition, bin_id_from_price, build_position
+from .lb_position import LBPosition, bin_id_from_price, build_position, price_at_bin
 from .metrics import BacktestMetrics, compute_metrics
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ _WARMUP_DAYS = 18  # 4h x 100 candles ≈ 17 days of lookback for MTF
 @dataclass
 class BacktestResult:
     config: dict
+    hold: BacktestMetrics
     static: BacktestMetrics
     strategy: BacktestMetrics
     start: str
@@ -36,6 +37,7 @@ class BacktestResult:
     capture: float
     daily_volume_usd: float | None
     events: list[dict]
+    series: dict | None = None  # per-step arrays for plotting (not serialized)
 
     def to_dict(self) -> dict:
         return {
@@ -44,6 +46,7 @@ class BacktestResult:
                        "start_price": self.start_price, "final_price": self.final_price},
             "fee_model": {"effective_capture": self.capture,
                           "assumed_pool_daily_volume_usd": self.daily_volume_usd},
+            "hold": self.hold.to_dict(),
             "static": self.static.to_dict(),
             "strategy": self.strategy.to_dict(),
             "rebalance_events": self.events,
@@ -56,6 +59,25 @@ def _mnt_weight(pos: LBPosition, price: float) -> float:
     return (mnt * price / total) if total > 0 else 0.0
 
 
+def _ema(fetcher: ReplayCandleFetcher, symbol: str, interval: str,
+         period: int, fallback: float) -> float:
+    try:
+        df = fetcher.get_candles(symbol, interval, period * 3)
+        if len(df) >= 5:
+            v = float(df["close"].ewm(span=period, adjust=False).mean().iloc[-1])
+            return v if v > 0 else fallback
+    except (RuntimeError, KeyError, ValueError):
+        pass
+    return fallback
+
+
+def _reenter_center(fetcher: ReplayCandleFetcher, cfg: BacktestConfig, spot: float) -> float:
+    """Re-entry center price: spot, or an EMA (mean-reversion anchor)."""
+    if cfg.reenter_center != "ema":
+        return spot
+    return _ema(fetcher, cfg.symbol, cfg.reenter_ema_interval, cfg.reenter_ema_period, spot)
+
+
 def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
                  refresh: bool = False) -> BacktestResult:
     histories = {
@@ -66,10 +88,19 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
     if base.empty:
         raise RuntimeError("No base candles fetched")
 
-    start_ts = base["timestamp"].iloc[0] + timedelta(days=_WARMUP_DAYS)
-    sim = base[base["timestamp"] >= start_ts].reset_index(drop=True)
+    first_ts, last_ts = base["timestamp"].iloc[0], base["timestamp"].iloc[-1]
+    if cfg.window_days:
+        win_end = last_ts - timedelta(days=cfg.window_end_days_ago)
+        win_start = win_end - timedelta(days=cfg.window_days)
+        min_start = first_ts + timedelta(days=_WARMUP_DAYS)
+        if win_start < min_start:
+            win_start = min_start
+        sim = base[(base["timestamp"] >= win_start) & (base["timestamp"] <= win_end)].reset_index(drop=True)
+    else:
+        win_start = first_ts + timedelta(days=_WARMUP_DAYS)
+        sim = base[base["timestamp"] >= win_start].reset_index(drop=True)
     if len(sim) < 50:
-        raise RuntimeError(f"Backtest window too short ({len(sim)} candles). Increase --days.")
+        raise RuntimeError(f"Backtest window too short ({len(sim)} candles). Increase history or window_days.")
 
     start_price = float(sim["close"].iloc[0])
 
@@ -97,7 +128,8 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
                               quote_usd_target=quote_target, bin_step=bs, dx=dx, dy=dy)
 
     static = make_position(start_price, cfg.bin_count, cfg.capital_usd, cfg.quote_usd_target)
-    strat = make_position(start_price, cfg.bin_count, cfg.capital_usd, cfg.quote_usd_target)
+    strat_bins0 = cfg.strat_initial_bin_count or cfg.bin_count
+    strat = make_position(start_price, strat_bins0, cfg.capital_usd, cfg.quote_usd_target)
     strat_label = cfg.strategy_mode if cfg.strategy_mode in ("narrow", "wide") else "narrow"
 
     s_fees = g_fees = 0.0
@@ -106,12 +138,21 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
     rebalances = 0
     s_equity: list[float] = []
     g_equity: list[float] = []
+    hold_equity: list[float] = []
     events: list[dict] = []
+    ts_series: list[str] = []
+    price_series: list[float] = []
+    g_lo_series: list[float] = []
+    g_hi_series: list[float] = []
+    s_lo = price_at_bin(static.min_bin, bs, dx, dy)
+    s_hi = price_at_bin(static.max_bin, bs, dx, dy)
 
     decision_period = timedelta(minutes=cfg.decision_period_min)
     cooldown = timedelta(minutes=cfg.reenter_cooldown_min)
     last_decision: pd.Timestamp | None = None
     last_reenter: pd.Timestamp | None = None
+    awaiting_stab = False
+    await_since: pd.Timestamp | None = None
 
     for _, row in sim.iterrows():
         ts = row["timestamp"]
@@ -126,6 +167,7 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
                                active_value_usd=static.active_bin_value(price),
                                capture=capture, cfg=cfg)
         s_equity.append(static.value(price) + s_fees)
+        hold_equity.append(static.hodl_value(price))
 
         # ── strategy ──
         g_in = strat.in_range(price)
@@ -146,13 +188,65 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
             pos_snap = PositionSnapshot(exists=True, in_range=g_in, bin_count=strat.bin_count,
                                         min_bin_id=strat.min_bin, max_bin_id=strat.max_bin,
                                         active_bin_id=active, deployed_value_usdt=gv)
+            # In forced narrow/wide mode, suppress the width-fitness exit (only
+            # true OOR should re-center) — otherwise a fixed wide position that
+            # is N× the Keltner-optimal thrashes (exit→re-enter wide→repeat).
+            forced = cfg.strategy_mode in ("narrow", "wide")
+            optimal_arg = None if forced else optimal_bins
             decision = engine.select_strategy(market, pos_snap, wallet,
-                                              optimal_bin_count=optimal_bins,
+                                              optimal_bin_count=optimal_arg,
                                               existing_position_strategy=strat_label)
+            # Passive mode: hold through OOR drift up to oor_tolerance_bins; only
+            # re-center on extreme sustained moves. Higher = closer to static.
+            if (decision.action == "exit_and_reenter" and cfg.oor_tolerance_bins is not None):
+                drift = max(strat.min_bin - active, active - strat.max_bin, 0)
+                if drift <= cfg.oor_tolerance_bins:
+                    decision = type(decision)(
+                        action="hold", reason=f"passive_tol(drift={drift})", confidence=1.0)
+
+            # Ranging-hold: don't chase in a RANGING regime — hold and earn fees
+            # on the oscillation like a static position.
+            if (decision.action == "exit_and_reenter" and cfg.ranging_hold
+                    and market.regime == "RANGING"):
+                decision = type(decision)(action="hold", reason="ranging_hold", confidence=1.0)
+
+            # Trend-confirmation gate: hold unless this is a STRONG confirmed
+            # continuation in the exit direction. Avoids chasing round-trip legs.
+            if decision.action == "exit_and_reenter" and cfg.trend_confirm_gate:
+                ex_down = active < strat.min_bin
+                ex_up = active > strat.max_bin
+                conf_ok = market.regime_confidence >= cfg.trend_confirm_min_confidence
+                confirmed = conf_ok and (
+                    (ex_down and market.regime == "TRENDING_DOWN" and market.higher_tf_bias == "BEAR")
+                    or (ex_up and market.regime == "TRENDING_UP" and market.higher_tf_bias == "BULL")
+                )
+                if not confirmed:
+                    decision = type(decision)(
+                        action="hold", reason="trend_unconfirmed_hold", confidence=1.0)
+
+            # Stabilization-hold: don't redeploy at an extreme. Wait until price
+            # retraces near its EMA, RSI normalizes, or a max wait elapses.
+            if decision.action == "exit_and_reenter" and cfg.stabilization_hold:
+                ema = _ema(fetcher, cfg.symbol, cfg.stab_ema_interval, cfg.stab_ema_period, price)
+                band_ok = abs(price - ema) / ema <= cfg.stab_ema_band_pct / 100.0
+                rsi_norm = not market.overbought and not market.oversold
+                if not awaiting_stab:
+                    awaiting_stab = True
+                    await_since = ts
+                timed_out = (ts - await_since) >= timedelta(minutes=cfg.stab_max_wait_min)
+                if band_ok or rsi_norm or timed_out:
+                    awaiting_stab = False  # stabilized → proceed to re-center
+                else:
+                    decision = type(decision)(
+                        action="hold", reason="stabilization_wait", confidence=1.0)
+            elif decision.action != "exit_and_reenter":
+                awaiting_stab = False  # back in range / holding → clear wait
+
             if decision.action == "exit_and_reenter":
                 # choose re-entry width from a fresh (no-position) decision
-                if cfg.strategy_mode in ("narrow", "wide"):
+                if forced:
                     new_label = cfg.strategy_mode
+                    width = cfg.narrow_bin_count if new_label == "narrow" else cfg.wide_bin_count
                 else:
                     entry = engine.select_strategy(
                         market,
@@ -160,31 +254,69 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
                                          min_bin_id=None, max_bin_id=None, active_bin_id=active),
                         wallet, optimal_bin_count=optimal_bins)
                     new_label = entry.action if entry.action in ("narrow", "wide") else strat_label
-                width = cfg.narrow_bin_count if new_label == "narrow" else cfg.wide_bin_count
+                    base_w = cfg.narrow_bin_count if new_label == "narrow" else cfg.wide_bin_count
+                    # snap to the engine's optimal width so we don't immediately
+                    # re-trigger the range_too_wide/narrow fitness exit.
+                    width = optimal_bins if optimal_bins else base_w
 
-                # execution cost: swap ~half capital toward 50/50 + gas
-                swap_notional = gv * 0.5
-                swap_cost = swap_notional * (cfg.slippage_bps + cfg.derived_lp_fee_rate() * 1e4) / 1e4
+                # Re-entry inventory policy (mirrors the live reentry_policy RSI
+                # gate). exit-DOWN + oversold, exit-UP + overbought, or a
+                # bear/ranging regime → keep current inventory (no swap), so we
+                # don't sell the low / buy the high. Otherwise rebalance to 50/50.
+                exit_down = active < strat.min_bin
+                exit_up = active > strat.max_bin
+                mnt_val, quote_val = strat.inventory(price)
+                keep_inventory = cfg.reentry_rsi_gate and (
+                    (exit_down and market.oversold)
+                    or (exit_up and market.overbought)
+                    or market.regime in ("TRENDING_DOWN", "RANGING")
+                )
                 gas_cost = cfg.gas_per_tx_mnt * cfg.tx_per_reenter * price
-                new_capital = max(0.0, gv - swap_cost - gas_cost)
+                if keep_inventory:
+                    swap_cost = 0.0
+                    reentry_mode = "continuation_safe"
+                    new_capital = max(0.0, gv - gas_cost)
+                    quote_target = quote_val * (new_capital / gv if gv else 0.0)
+                else:
+                    # only swap the gap needed to reach ~50/50
+                    swap_notional = abs(gv * 0.5 - quote_val)
+                    swap_cost = swap_notional * (cfg.slippage_bps + cfg.derived_lp_fee_rate() * 1e4) / 1e4
+                    reentry_mode = "rebalance_50_50"
+                    new_capital = max(0.0, gv - swap_cost - gas_cost)
+                    quote_target = new_capital * 0.5
                 g_rebal += swap_cost
                 g_gas += gas_cost
                 rebalances += 1
                 strat_label = new_label
-                strat = make_position(price, width, new_capital, new_capital * 0.5)
+                center = _reenter_center(fetcher, cfg, price)
+                strat = make_position(center, width, new_capital, quote_target)
                 last_reenter = ts
                 events.append({"ts": ts.isoformat(), "action": "exit_and_reenter",
                                "reason": decision.reason, "new_strategy": new_label,
+                               "reentry_mode": reentry_mode, "center": round(center, 5),
+                               "exit_dir": "down" if exit_down else "up" if exit_up else "edge",
+                               "oversold": market.oversold, "regime": market.regime,
                                "width": width, "price": round(price, 5),
                                "value_before": round(gv, 2),
                                "swap_cost": round(swap_cost, 2), "gas_cost": round(gas_cost, 2)})
 
         g_equity.append(strat.value(price) + g_fees)
+        ts_series.append(ts.isoformat())
+        price_series.append(price)
+        g_lo_series.append(price_at_bin(strat.min_bin, bs, dx, dy))
+        g_hi_series.append(price_at_bin(strat.max_bin, bs, dx, dy))
 
     end_ts = sim["timestamp"].iloc[-1]
     final_price = float(sim["close"].iloc[-1])
     days = (end_ts - sim["timestamp"].iloc[0]).total_seconds() / 86400
     total_steps = len(sim)
+
+    hold_end = static.hodl_value(final_price)
+    hold_m = compute_metrics(
+        label="hold", days=days, initial_value_usd=cfg.capital_usd,
+        final_lp_value_usd=hold_end, hodl_value_usd=hold_end,
+        total_fees_usd=0.0, gas_cost_usd=0.0, rebalance_cost_usd=0.0,
+        in_range_steps=0, total_steps=total_steps, rebalances=0, equity_curve=hold_equity)
 
     static_m = compute_metrics(
         label="static", days=days, initial_value_usd=cfg.capital_usd,
@@ -198,7 +330,15 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
         total_fees_usd=g_fees, gas_cost_usd=g_gas, rebalance_cost_usd=g_rebal,
         in_range_steps=g_inrange, total_steps=total_steps, rebalances=rebalances, equity_curve=g_equity)
 
+    series = {
+        "ts": ts_series, "price": price_series,
+        "static_lo": s_lo, "static_hi": s_hi,
+        "strat_lo": g_lo_series, "strat_hi": g_hi_series,
+        "static_equity": s_equity, "strategy_equity": g_equity,
+        "hold_equity": hold_equity,
+    }
     return BacktestResult(
-        config=cfg.to_dict(), static=static_m, strategy=strat_m,
+        config=cfg.to_dict(), hold=hold_m, static=static_m, strategy=strat_m,
         start=sim["timestamp"].iloc[0].isoformat(), end=end_ts.isoformat(),
-        final_price=final_price, start_price=start_price, events=events)
+        final_price=final_price, start_price=start_price,
+        capture=capture, daily_volume_usd=daily_volume, events=events, series=series)

@@ -68,19 +68,19 @@ def test_quote_below_mnt_above_active():
 def test_fee_zero_out_of_range():
     cfg = BacktestConfig()
     assert step_fee_usd(candle_turnover_usd=1e6, in_range=False,
-                        active_value_usd=100.0, cfg=cfg) == 0.0
+                        active_value_usd=100.0, capture=1.0, cfg=cfg) == 0.0
 
 
 def test_fee_monotonic_in_volume():
     cfg = BacktestConfig()
-    lo = step_fee_usd(candle_turnover_usd=1000.0, in_range=True, active_value_usd=100.0, cfg=cfg)
-    hi = step_fee_usd(candle_turnover_usd=2000.0, in_range=True, active_value_usd=100.0, cfg=cfg)
+    lo = step_fee_usd(candle_turnover_usd=1000.0, in_range=True, active_value_usd=100.0, capture=1.0, cfg=cfg)
+    hi = step_fee_usd(candle_turnover_usd=2000.0, in_range=True, active_value_usd=100.0, capture=1.0, cfg=cfg)
     assert hi > lo > 0
 
 
 def test_fee_share_caps_at_full_liquidity():
     cfg = BacktestConfig(pool_active_liquidity_usd=0.0)
-    fee = step_fee_usd(candle_turnover_usd=1000.0, in_range=True, active_value_usd=100.0, cfg=cfg)
+    fee = step_fee_usd(candle_turnover_usd=1000.0, in_range=True, active_value_usd=100.0, capture=1.0, cfg=cfg)
     # with no competing liquidity, LP captures full fee_rate of volume
     assert math.isclose(fee, 1000.0 * cfg.derived_lp_fee_rate(), rel_tol=1e-9)
 

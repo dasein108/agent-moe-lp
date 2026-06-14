@@ -21,7 +21,12 @@ class BacktestConfig:
     # ── Price feed ──
     symbol: str = "MNTUSDT"
     base_interval: str = "5m"          # marking + fee accrual cadence
-    lookback_days: int = 90
+    lookback_days: int = 90            # how much history to fetch/cache
+    # Optional explicit sim window (for walk-forward). When window_days is set,
+    # the sim runs that many days ending window_end_days_ago before the latest
+    # candle (warmup is taken from history preceding the window).
+    window_days: int | None = None
+    window_end_days_ago: float = 0.0
 
     # ── Pool / token geometry (from live snapshot) ──
     bin_step: int = 100                # basis points per bin
@@ -31,7 +36,8 @@ class BacktestConfig:
     protocol_share_bps: int = 2500     # protocol cut of swap fee (bps of fee)
 
     # ── Position shape ──
-    bin_count: int = 10
+    bin_count: int = 10                # static baseline + default initial width
+    strat_initial_bin_count: int | None = None  # strategy's own initial width (else bin_count)
     capital_usd: float = 185.0
     quote_usd_target: float = 50.0     # USD on the quote(USDT) side; rest is MNT
     distribution: str = "uniform"      # uniform | slope | curve
@@ -58,6 +64,40 @@ class BacktestConfig:
     narrow_bin_count: int = 10
     wide_bin_count: int = 80
     wide_confidence_threshold: float = 0.5
+    # Re-entry RSI/regime gate (mirrors the live reentry_policy): when exiting
+    # DOWN while oversold (or in a bear/ranging regime), keep MNT instead of
+    # rebalancing to 50/50 — avoids selling the local low. Off = always 50/50.
+    reentry_rsi_gate: bool = True
+
+    # ── Experimental anti-chase levers (backtest only, for now) ──
+    # Mean-centered re-entry: center the new position on an EMA instead of spot,
+    # so we redeploy near where price reverts to rather than chasing the extreme.
+    reenter_center: str = "spot"       # spot | ema
+    reenter_ema_interval: str = "4h"
+    reenter_ema_period: int = 50
+    # Ranging-regime hold: in a RANGING regime, do NOT re-center — hold the
+    # position and earn fees on the oscillation like a static position would.
+    ranging_hold: bool = False
+    # Trend-confirmation gate: only re-center on STRONG confirmed continuation
+    # (regime trending in the exit direction + aligned higher-TF bias + regime
+    # confidence ≥ threshold). Otherwise HOLD. Hold-by-default makes round-trips
+    # converge toward static (no chasing) while real trends still get followed.
+    trend_confirm_gate: bool = False
+    trend_confirm_min_confidence: float = 0.6
+    # Stabilization-hold: after an OOR exit in a strong move, do NOT redeploy at
+    # the extreme. Hold (out of range, no fees) until price retraces within
+    # stab_ema_band_pct of its EMA, OR RSI normalizes (not over/oversold), OR
+    # stab_max_wait_min elapses — then re-enter at the stabilized price. Targets
+    # the buy-the-high / sell-the-low losses from re-centering at extremes.
+    stabilization_hold: bool = False
+    stab_ema_interval: str = "4h"
+    stab_ema_period: int = 50
+    stab_ema_band_pct: float = 4.0
+    stab_max_wait_min: int = 2880  # 2 days
+    # Passive mode: hold through out-of-range drift up to this many bins (binStep
+    # 100 → 1% price per bin), only re-centering on extreme sustained drift.
+    # Higher = more passive (converges to static). None = use engine default.
+    oor_tolerance_bins: int | None = None
 
     def derived_lp_fee_rate(self) -> float:
         """LP-net fractional fee per swap (after protocol share)."""

@@ -21,6 +21,13 @@
       "prompt": "Based on current market conditions, would this bot pick a narrow or a wide LP position right now, and why? Analyze the market signals it uses. Don't execute anything.",
       "expected_output": "Runs `moe-farm --once --json --strategy auto` (dry-run) and/or the quant analyzers; explains the decision via Keltner channel width + ATR + MTF regime; notes graceful degradation if candles unavailable. No live tx.",
       "files": []
+    },
+    {
+      "id": 3,
+      "name": "backtest-current-position",
+      "prompt": "Backtest how my current live LP position would have performed over the last 3 months of price action — fees, impermanent loss, and whether the strategy beats just holding the position. Don't send any transactions.",
+      "expected_output": "Runs `moe-backtest --seed-from-pool 0x<LBpair> --days 90` (seeds geometry/fees/size/depth from a live read-only snapshot, no tx). Reports static vs strategy fees, IL, in-range %, net PnL/APR. Calls out that fee figures depend on the assumed pool daily volume (`--pool-daily-volume-usd`) since on-chain historical volume isn't available, and that IL/in-range are exact. Does not invent the APR as fact.",
+      "files": []
     }
   ]
 }

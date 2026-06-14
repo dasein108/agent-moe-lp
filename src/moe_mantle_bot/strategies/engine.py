@@ -124,9 +124,17 @@ class StrategyEngine:
         *,
         wide_confidence_threshold: float = 0.5,
         min_top_up_free_value_usdt: float = 20.0,
+        oor_tolerance_bins: int = 15,
+        oor_tolerance_cap_bins: int = 40,
     ):
         self.wide_confidence_threshold = wide_confidence_threshold
         self.min_top_up_free_value_usdt = min_top_up_free_value_usdt
+        # Out-of-range tolerance floor/cap (bins) for the adaptive OOR hold.
+        # Higher = more passive (fewer value-destroying re-centers at extremes).
+        # NOTE: tolerance is in BINS; price-% ≈ bins × bin_step/100, so for a
+        # binStep-15 pool 30 bins ≈ 4.5%, for binStep-100 ≈ 30%. Tune per pool.
+        self.oor_tolerance_bins = oor_tolerance_bins
+        self.oor_tolerance_cap_bins = oor_tolerance_cap_bins
 
     def select_strategy(
         self,
@@ -167,9 +175,11 @@ class StrategyEngine:
             # Adaptive OOR tolerance: scale with volatility.
             # Calm market (keltner 1%) → floor at 15 bins (was 5 — too tight, caused churn).
             # Volatile (keltner 4%) → wide tolerance (32 bins). More likely to bounce.
-            oor_tol = self.OOR_TOLERANCE_BINS  # default 15
+            oor_tol = self.oor_tolerance_bins
             if market.keltner_width_pct and market.keltner_width_pct > 0:
-                oor_tol = max(15, min(40, int(market.keltner_width_pct / 0.05 * 0.3)))
+                oor_tol = max(self.oor_tolerance_bins,
+                              min(self.oor_tolerance_cap_bins,
+                                  int(market.keltner_width_pct / 0.05 * 0.3)))
 
             if drift <= oor_tol:
                 return StrategyDecision(

@@ -32,6 +32,8 @@ so every agent shares one source of truth.
     `skills/moe-lp-operations/references/lp-operations.md`
   - Market / technical analysis (Keltner, ATR, MTF, bias → narrow/wide) →
     `skills/moe-lp-operations/references/market-analysis.md`
+  - Backtesting (fee yield / IL / in-range / net PnL over Bybit history;
+    `moe-backtest`) → `skills/moe-lp-operations/references/backtesting.md`
   - Programmatic (Python) access to `LPService` / `BalanceManager` / `quant/` →
     `skills/moe-lp-operations/references/python-api.md`
 

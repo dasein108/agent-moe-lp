@@ -218,3 +218,26 @@ class TestDecisionIsPureData:
         engine = StrategyEngine(wide_confidence_threshold=0.5)
         # Can be instantiated without any blockchain service
         assert engine is not None
+
+
+class TestOorToleranceConfigurable:
+    """Raising the OOR tolerance makes the engine hold (passive) where the
+    default would re-center — the backtest-validated anti-chase lever."""
+
+    def _oor_inputs(self):
+        # active 25 bins below the range → drift = 25
+        pos = _position(exists=True, in_range=False, bin_count=10,
+                        active=8326075, min_bin=8326100, max_bin=8326200)
+        return _market(regime="RANGING"), pos, _wallet()
+
+    def test_default_tolerance_exits(self):
+        mkt, pos, wal = self._oor_inputs()
+        d = StrategyEngine().select_strategy(mkt, pos, wal)
+        assert d.action == "exit_and_reenter"  # drift 25 > default tol 15
+
+    def test_raised_tolerance_holds(self):
+        mkt, pos, wal = self._oor_inputs()
+        engine = StrategyEngine(oor_tolerance_bins=30, oor_tolerance_cap_bins=60)
+        d = engine.select_strategy(mkt, pos, wal)
+        assert d.action == "hold"          # drift 25 <= raised tol 30
+        assert "oor_tolerance" in d.reason
