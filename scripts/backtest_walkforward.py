@@ -29,8 +29,9 @@ OFFSETS = [0, 15, 30, 45, 60, 72]  # window_end_days_ago
 
 VARIANTS = [
     ("baseline", dict()),
-    ("stab-hold", dict(stabilization_hold=True)),
-    ("stab+narrow7", dict(stabilization_hold=True, narrow_bin_count=7)),
+    ("passive tol30", dict(oor_tolerance_bins=30)),
+    ("passive tol50", dict(oor_tolerance_bins=50)),
+    ("passive tol80", dict(oor_tolerance_bins=80)),
 ]
 
 

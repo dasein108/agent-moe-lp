@@ -196,6 +196,14 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
             decision = engine.select_strategy(market, pos_snap, wallet,
                                               optimal_bin_count=optimal_arg,
                                               existing_position_strategy=strat_label)
+            # Passive mode: hold through OOR drift up to oor_tolerance_bins; only
+            # re-center on extreme sustained moves. Higher = closer to static.
+            if (decision.action == "exit_and_reenter" and cfg.oor_tolerance_bins is not None):
+                drift = max(strat.min_bin - active, active - strat.max_bin, 0)
+                if drift <= cfg.oor_tolerance_bins:
+                    decision = type(decision)(
+                        action="hold", reason=f"passive_tol(drift={drift})", confidence=1.0)
+
             # Ranging-hold: don't chase in a RANGING regime — hold and earn fees
             # on the oscillation like a static position.
             if (decision.action == "exit_and_reenter" and cfg.ranging_hold

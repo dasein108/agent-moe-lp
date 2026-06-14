@@ -94,6 +94,10 @@ class BacktestConfig:
     stab_ema_period: int = 50
     stab_ema_band_pct: float = 4.0
     stab_max_wait_min: int = 2880  # 2 days
+    # Passive mode: hold through out-of-range drift up to this many bins (binStep
+    # 100 → 1% price per bin), only re-centering on extreme sustained drift.
+    # Higher = more passive (converges to static). None = use engine default.
+    oor_tolerance_bins: int | None = None
 
     def derived_lp_fee_rate(self) -> float:
         """LP-net fractional fee per swap (after protocol share)."""
