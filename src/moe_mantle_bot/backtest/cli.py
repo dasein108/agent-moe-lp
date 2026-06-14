@@ -112,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--strategy", choices=["auto", "narrow", "wide"], default="auto")
     p.add_argument("--no-rsi-gate", action="store_true",
                    help="disable the re-entry RSI/regime gate (always rebalance to 50/50)")
+    p.add_argument("--stabilization-hold", action="store_true",
+                   help="after an OOR exit, wait for price to stabilize (near EMA / RSI normal) before re-entering")
+    p.add_argument("--trend-confirm-gate", action="store_true",
+                   help="only re-center on strong confirmed trend continuation, else hold")
     p.add_argument("--decision-period-min", type=int, default=60)
     p.add_argument("--slippage-bps", type=float)
     p.add_argument("--gas-per-tx-mnt", type=float)
@@ -146,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
             cfg_kwargs[k] = v
     if args.no_rsi_gate:
         cfg_kwargs["reentry_rsi_gate"] = False
+    if args.stabilization_hold:
+        cfg_kwargs["stabilization_hold"] = True
+    if args.trend_confirm_gate:
+        cfg_kwargs["trend_confirm_gate"] = True
 
     valid = {f.name for f in dataclasses.fields(BacktestConfig)}
     cfg = BacktestConfig(**{k: v for k, v in cfg_kwargs.items() if k in valid})

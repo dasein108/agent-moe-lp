@@ -29,7 +29,8 @@ OFFSETS = [0, 15, 30, 45, 60, 72]  # window_end_days_ago
 
 VARIANTS = [
     ("baseline", dict()),
-    ("trend-gate", dict(trend_confirm_gate=True)),
+    ("stab-hold", dict(stabilization_hold=True)),
+    ("stab+narrow7", dict(stabilization_hold=True, narrow_bin_count=7)),
 ]
 
 

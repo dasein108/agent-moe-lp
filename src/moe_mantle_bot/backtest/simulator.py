@@ -59,18 +59,23 @@ def _mnt_weight(pos: LBPosition, price: float) -> float:
     return (mnt * price / total) if total > 0 else 0.0
 
 
+def _ema(fetcher: ReplayCandleFetcher, symbol: str, interval: str,
+         period: int, fallback: float) -> float:
+    try:
+        df = fetcher.get_candles(symbol, interval, period * 3)
+        if len(df) >= 5:
+            v = float(df["close"].ewm(span=period, adjust=False).mean().iloc[-1])
+            return v if v > 0 else fallback
+    except (RuntimeError, KeyError, ValueError):
+        pass
+    return fallback
+
+
 def _reenter_center(fetcher: ReplayCandleFetcher, cfg: BacktestConfig, spot: float) -> float:
     """Re-entry center price: spot, or an EMA (mean-reversion anchor)."""
     if cfg.reenter_center != "ema":
         return spot
-    try:
-        df = fetcher.get_candles(cfg.symbol, cfg.reenter_ema_interval, cfg.reenter_ema_period * 3)
-        if len(df) >= 5:
-            ema = float(df["close"].ewm(span=cfg.reenter_ema_period, adjust=False).mean().iloc[-1])
-            return ema if ema > 0 else spot
-    except (RuntimeError, KeyError, ValueError):
-        pass
-    return spot
+    return _ema(fetcher, cfg.symbol, cfg.reenter_ema_interval, cfg.reenter_ema_period, spot)
 
 
 def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
@@ -146,6 +151,8 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
     cooldown = timedelta(minutes=cfg.reenter_cooldown_min)
     last_decision: pd.Timestamp | None = None
     last_reenter: pd.Timestamp | None = None
+    awaiting_stab = False
+    await_since: pd.Timestamp | None = None
 
     for _, row in sim.iterrows():
         ts = row["timestamp"]
@@ -208,6 +215,24 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
                 if not confirmed:
                     decision = type(decision)(
                         action="hold", reason="trend_unconfirmed_hold", confidence=1.0)
+
+            # Stabilization-hold: don't redeploy at an extreme. Wait until price
+            # retraces near its EMA, RSI normalizes, or a max wait elapses.
+            if decision.action == "exit_and_reenter" and cfg.stabilization_hold:
+                ema = _ema(fetcher, cfg.symbol, cfg.stab_ema_interval, cfg.stab_ema_period, price)
+                band_ok = abs(price - ema) / ema <= cfg.stab_ema_band_pct / 100.0
+                rsi_norm = not market.overbought and not market.oversold
+                if not awaiting_stab:
+                    awaiting_stab = True
+                    await_since = ts
+                timed_out = (ts - await_since) >= timedelta(minutes=cfg.stab_max_wait_min)
+                if band_ok or rsi_norm or timed_out:
+                    awaiting_stab = False  # stabilized → proceed to re-center
+                else:
+                    decision = type(decision)(
+                        action="hold", reason="stabilization_wait", confidence=1.0)
+            elif decision.action != "exit_and_reenter":
+                awaiting_stab = False  # back in range / holding → clear wait
 
             if decision.action == "exit_and_reenter":
                 # choose re-entry width from a fresh (no-position) decision

@@ -84,6 +84,16 @@ class BacktestConfig:
     # converge toward static (no chasing) while real trends still get followed.
     trend_confirm_gate: bool = False
     trend_confirm_min_confidence: float = 0.6
+    # Stabilization-hold: after an OOR exit in a strong move, do NOT redeploy at
+    # the extreme. Hold (out of range, no fees) until price retraces within
+    # stab_ema_band_pct of its EMA, OR RSI normalizes (not over/oversold), OR
+    # stab_max_wait_min elapses — then re-enter at the stabilized price. Targets
+    # the buy-the-high / sell-the-low losses from re-centering at extremes.
+    stabilization_hold: bool = False
+    stab_ema_interval: str = "4h"
+    stab_ema_period: int = 50
+    stab_ema_band_pct: float = 4.0
+    stab_max_wait_min: int = 2880  # 2 days
 
     def derived_lp_fee_rate(self) -> float:
         """LP-net fractional fee per swap (after protocol share)."""
