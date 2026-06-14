@@ -100,6 +100,23 @@ knobs — only the fee/APR figures do.
 The text report ends with the **initial budget** and the **final budget** for
 both static and strategy (`initial + net PnL`).
 
+## Tuning findings (WMNT/USDT0 binStep-100, ~4mo walk-forward)
+
+Run `scripts/backtest_walkforward.py`, `scripts/backtest_hyperopt.py`,
+`scripts/backtest_compare.py` to reproduce.
+
+- **Position width dominates; re-centering is ~inert.** A width sweep (static,
+  no re-center) is an inverted-U peaking at **~20 bins (±10%)**: 10 bins +2.97%,
+  **20 bins +3.92%**, 40 bins +1.90% mean net across 6 rolling windows. Too
+  narrow → frequent out-of-range (misses fees); too wide → diluted fee share.
+- **Hyperopt** (random search, scored on the walk-forward) found the top configs
+  all share only `initial width = 20` — every re-center param (tolerance, RSI
+  gate, stabilization, cadence, mode) had zero effect, because a 20-bin position
+  never went OOR. Re-centering at extremes is net-negative; passive ties static.
+- **Actionable**: tune `BIN_COUNT` to ~±10% in price terms. That is **20 bins on
+  binStep-100**, but ~**133 bins on binStep-15** — width-in-bins is pool-specific
+  (price-% ≈ bins × bin_step/100). No code change; `BIN_COUNT` is configurable.
+
 ## Caveats
 
 - Fees are an estimate, not a guarantee — calibrate volume.
