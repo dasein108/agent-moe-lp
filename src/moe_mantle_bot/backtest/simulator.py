@@ -83,10 +83,19 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
     if base.empty:
         raise RuntimeError("No base candles fetched")
 
-    start_ts = base["timestamp"].iloc[0] + timedelta(days=_WARMUP_DAYS)
-    sim = base[base["timestamp"] >= start_ts].reset_index(drop=True)
+    first_ts, last_ts = base["timestamp"].iloc[0], base["timestamp"].iloc[-1]
+    if cfg.window_days:
+        win_end = last_ts - timedelta(days=cfg.window_end_days_ago)
+        win_start = win_end - timedelta(days=cfg.window_days)
+        min_start = first_ts + timedelta(days=_WARMUP_DAYS)
+        if win_start < min_start:
+            win_start = min_start
+        sim = base[(base["timestamp"] >= win_start) & (base["timestamp"] <= win_end)].reset_index(drop=True)
+    else:
+        win_start = first_ts + timedelta(days=_WARMUP_DAYS)
+        sim = base[base["timestamp"] >= win_start].reset_index(drop=True)
     if len(sim) < 50:
-        raise RuntimeError(f"Backtest window too short ({len(sim)} candles). Increase --days.")
+        raise RuntimeError(f"Backtest window too short ({len(sim)} candles). Increase history or window_days.")
 
     start_price = float(sim["close"].iloc[0])
 
@@ -185,6 +194,20 @@ def run_backtest(cfg: BacktestConfig, *, cache_dir: Path | None = None,
             if (decision.action == "exit_and_reenter" and cfg.ranging_hold
                     and market.regime == "RANGING"):
                 decision = type(decision)(action="hold", reason="ranging_hold", confidence=1.0)
+
+            # Trend-confirmation gate: hold unless this is a STRONG confirmed
+            # continuation in the exit direction. Avoids chasing round-trip legs.
+            if decision.action == "exit_and_reenter" and cfg.trend_confirm_gate:
+                ex_down = active < strat.min_bin
+                ex_up = active > strat.max_bin
+                conf_ok = market.regime_confidence >= cfg.trend_confirm_min_confidence
+                confirmed = conf_ok and (
+                    (ex_down and market.regime == "TRENDING_DOWN" and market.higher_tf_bias == "BEAR")
+                    or (ex_up and market.regime == "TRENDING_UP" and market.higher_tf_bias == "BULL")
+                )
+                if not confirmed:
+                    decision = type(decision)(
+                        action="hold", reason="trend_unconfirmed_hold", confidence=1.0)
 
             if decision.action == "exit_and_reenter":
                 # choose re-entry width from a fresh (no-position) decision
