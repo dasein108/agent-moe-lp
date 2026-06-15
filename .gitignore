@@ -2,6 +2,8 @@
 .venv/
 wallet.json
 wallet*.json
+# Plaintext wallet backups produced by `moe wallet encrypt`
+*.plain.bak
 # Skill eval run artifacts (regenerable); evals/evals.json is kept
 skills/*-workspace/
 data/

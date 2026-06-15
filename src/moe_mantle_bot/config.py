@@ -66,6 +66,7 @@ class Settings:
     tx_deadline_seconds: int = 1800
     wallet_address: str | None = None
     private_key: str | None = None
+    keystore_password: str | None = None
     wallet_file: Path = Path("wallet.json")
     debug: bool = False
     log_scan_start_block: int = 0
@@ -516,6 +517,7 @@ class Settings:
             tx_deadline_seconds=_env_int("TX_DEADLINE_SECONDS", 1800),
             wallet_address=os.getenv("WALLET_ADDRESS") or None,
             private_key=os.getenv("PRIVATE_KEY") or None,
+            keystore_password=os.getenv("KEYSTORE_PASSWORD") or None,
             wallet_file=Path(os.getenv("WALLET_FILE", "wallet.json")),
             debug=_env_bool("MOE_DEBUG", False),
             log_scan_start_block=_env_int("LOG_SCAN_START_BLOCK", 0),

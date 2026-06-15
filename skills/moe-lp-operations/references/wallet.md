@@ -6,9 +6,11 @@ default for both reads and writes**.
 
 ## ⚠️ Security first
 
-- `wallet.json` contains a **plaintext private key**. It is git-ignored and written
-  with `0o600` (owner read/write only). Never commit it, print the private key, paste
-  it into chat/logs, or send it anywhere.
+- `wallet.json` holds the signing key with `0o600` (owner read/write only) and is
+  git-ignored. It may be an **encrypted Ethereum V3 keystore** (decrypted at runtime
+  via `KEYSTORE_PASSWORD`) or a legacy **plaintext** file — both load transparently.
+  Encrypt an existing wallet with `moe wallet encrypt` (see `WALLET_ENCRYPTION.md`).
+  Never commit it, print the private key, paste it into chat/logs, or send it anywhere.
 - `moe wallet show` prints only **metadata (address + file path)**, never the key —
   prefer it when you just need the address.
 - Read-only inspection (`moe snapshot`, `moe-readonly`, pool/market analysis) needs

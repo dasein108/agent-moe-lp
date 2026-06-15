@@ -103,7 +103,25 @@ def build_parser() -> argparse.ArgumentParser:
     wallet_create = wallet_sub.add_parser("create", help="Create a new wallet.json file.")
     wallet_create.add_argument("--out", type=Path)
     wallet_create.add_argument("--force", action="store_true")
+    wallet_create.add_argument(
+        "--encrypt",
+        action="store_true",
+        help="Write an encrypted keystore using KEYSTORE_PASSWORD instead of plaintext.",
+    )
     wallet_create.add_argument("--json", action="store_true")
+
+    wallet_encrypt = wallet_sub.add_parser(
+        "encrypt",
+        help="Encrypt the wallet file in place as an Ethereum keystore using KEYSTORE_PASSWORD.",
+    )
+    wallet_encrypt.add_argument("--out", type=Path, help="Output path (default: encrypt in place).")
+    wallet_encrypt.add_argument("--password", help="Override KEYSTORE_PASSWORD for this run.")
+    wallet_encrypt.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Do not write a .plain.bak copy of the existing plaintext wallet.",
+    )
+    wallet_encrypt.add_argument("--json", action="store_true")
 
     wallet_show = wallet_sub.add_parser("show", help="Show the current wallet file metadata.")
     wallet_show.add_argument("--json", action="store_true")
@@ -178,8 +196,20 @@ def main() -> None:
         if args.wallet_command == "create":
             wallet = WalletRecord.create()
             output_path = args.out or args.wallet_file or settings.wallet_file
-            wallet.save(output_path, force=args.force)
-            payload = {"path": str(output_path), "address": wallet.address, "created_at": wallet.created_at}
+            encrypted = bool(args.encrypt)
+            if encrypted:
+                password = settings.keystore_password
+                if not password:
+                    raise RuntimeError("--encrypt requires KEYSTORE_PASSWORD to be set in the environment.")
+                wallet.save_encrypted(output_path, password, force=args.force)
+            else:
+                wallet.save(output_path, force=args.force)
+            payload = {
+                "path": str(output_path),
+                "address": wallet.address,
+                "created_at": wallet.created_at,
+                "encrypted": encrypted,
+            }
             if args.json:
                 print(json.dumps(payload, indent=2, sort_keys=True))
             else:
@@ -187,7 +217,48 @@ def main() -> None:
                 logger.info("Wallet created", extra={
                     "output_path": str(output_path),
                     "address": wallet.address,
-                    "private_key_stored": True
+                    "private_key_stored": True,
+                    "encrypted": encrypted,
+                })
+            return
+
+        if args.wallet_command == "encrypt":
+            source_path = args.wallet_file or settings.wallet_file
+            if not source_path.exists():
+                raise RuntimeError(f"Wallet file not found: {source_path}")
+            password = args.password or settings.keystore_password
+            if not password:
+                raise RuntimeError("KEYSTORE_PASSWORD is not set (and --password not given).")
+            # Load existing wallet (plaintext or already-encrypted).
+            wallet = WalletRecord.from_file(source_path, password=password)
+            output_path = args.out or source_path
+            in_place = output_path == source_path
+            if in_place and not args.no_backup:
+                backup = source_path.with_suffix(source_path.suffix + ".plain.bak")
+                backup.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+                backup.chmod(0o600)
+            wallet.save_encrypted(output_path, password, force=True)
+            # Verify the keystore round-trips before we report success.
+            reloaded = WalletRecord.from_file(output_path, password=password)
+            if reloaded.address != wallet.address:
+                raise RuntimeError("Keystore verification failed: decrypted address mismatch.")
+            payload = {
+                "path": str(output_path),
+                "address": wallet.address,
+                "encrypted": True,
+                "verified": True,
+                "backup": str(source_path.with_suffix(source_path.suffix + ".plain.bak"))
+                if (in_place and not args.no_backup)
+                else None,
+            }
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                logger = get_logger("command_cli")
+                logger.info("Wallet encrypted", extra={
+                    "output_path": str(output_path),
+                    "address": wallet.address,
+                    "verified": True,
                 })
             return
 
